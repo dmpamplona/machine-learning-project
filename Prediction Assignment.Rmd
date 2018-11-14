@@ -1,0 +1,113 @@
+---
+title: "Prediction Asignment Writeup"
+author: "Daniel David Pamplona"
+date: "November 13, 2018"
+output: html_document
+---
+
+# Introduction
+Accelerometers provide quantitative information on the movement of participants wearing them. It is particularly useful not only in measuring how much of an activity you do, but also how well you do it. 
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the type of exercise performed.
+More information can be found from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+
+
+# Overview of Analyses
+This write up is generally divided into 5 parts, namely:
+
+* **Getting Data** - extracting data from a specified source
+* **Cleaning Data** - removal of unecessary variables to reduce model complexity and computing time. 
+* **Cross Validation** - subsetting the data to create a pseudo train and psuedo validation data set to estimate test error.
+* **Model Selection** - application of machine learning algorithims to the data. Each model is evaluated by its predictive accuracy to the pseudo validaton set.
+* **Final Conclusions** - interpretation of final model and general conlusions.
+
+# Getting Data
+The data for this project came from **Groupware@LES**, also called the *Human Activity Recognition* **HAR** data set. More information about the data set is found here:http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+
+```{r,echo=TRUE, eval=TRUE}
+train <- read.csv("C:/Users/David/Desktop/pml-training.csv")
+test <- read.csv("C:/Users/David/Desktop/pml-testing.csv")
+```
+
+#### Some Exploratory Techniques
+```{r,echo=TRUE, fig.dim=c(5,5)}
+library(ggplot2)
+library(gridExtra)
+class(train$classe)
+table(train$classe)
+
+pb <- ggplot(train, aes(classe, pitch_belt))
+pb <- pb + geom_boxplot() + ggtitle("Roll Belt")
+yb <- ggplot(train, aes(classe, yaw_belt))
+yb <- yb + geom_boxplot() + ggtitle("Yaw Belt")
+rb <- ggplot(train, aes(classe, roll_belt))
+rb <- rb + geom_boxplot() + ggtitle("Roll Belt")
+ta.b <- ggplot(train, aes(classe, total_accel_belt))
+ta.b <- ta.b + geom_boxplot() + ggtitle("Total Accel Belt")
+grid.arrange(pb,yb,rb,ta.b,nrow=2,ncol=2)
+
+```
+
+# Cleaning Data
+It can be observed that several variables (columns) in the data have mostly `NA` or `missing` values. These variables were removed as they do not contribute to model efficiency and prediction. 
+A straightforward criteria was used, if the column has at least 90% `NA` or `missing` values that column is discarded. Also, the first seven columns were removed since these variables are not accelerometer measurements. 
+The columns removed in the train data set are the same columns removed in the test set to fascilitate scalability. 
+
+```{r,echo=TRUE}
+str(train)
+i.remcol <- which(colSums(is.na(train) |train=="")>0.9*dim(train)[1]) 
+train.f <- train[,-i.remcol]
+train.f <- train.f[,-c(1:7)]    # Since the first 7 columns are not useful for prediction
+
+# Cleaning Test Data (Using the removed variables in train)
+test.f <- test[,-i.remcol]
+test.f <- test.f[,-c(1:7)]
+```
+
+# Cross-Validation
+The train data set is further subdived into two parts, a pseudo train data (`train.f1`) and a pseudo test data (`train.f2`) to estimate the test error. The proportion for each partition is 70 and 30 respectively. 
+
+```{r, echo=TRUE}
+library(caret)
+library(gbm)
+inTrain = createDataPartition(train$classe, p = 0.7, list=FALSE)
+train.f1 = train.f[ inTrain,]
+train.f2 = train.f[-inTrain,]
+```
+
+# Model Selection
+In predicting the type of exercise `classe`, we try out 2 different machine learning algorithms: **Random Forest** and **Boosting**. We also include a third model using the stacked version of the two. The models are evaluated based on their predictive accuracy on the pseudo test data `train.f2`. 
+
+```{r,echo=TRUE}
+library(caret)
+library(gbm)
+set.seed(62433)
+
+# Random Forest
+mod_rf <- train(classe ~ ., data = train.f1, method = "rf")
+pred_rf <- predict(mod_rf, train.f2)
+confusionMatrix(pred_rf,train.f2$classe)$table
+confusionMatrix(pred_rf,train.f2$classe)$overall[1]
+
+# Boosting
+mod_gbm <- train(classe ~ ., data = train.f1, method = "gbm", verbose=FALSE)
+pred_gbm <- predict(mod_gbm, train.f2)
+confusionMatrix(pred_gbm,train.f2$classe)$table
+confusionMatrix(pred_gbm,train.f2$classe)$overall[1]
+
+# Stacked predictors
+predDF <- data.frame(pred_rf, pred_gbm, classe = train.f2$classe)
+mod_comb <- train(classe ~ ., method = "rf", data = predDF)
+pred_comb <- predict(mod_comb, train.f2)
+confusionMatrix(pred_comb,train.f2$classe)$overall[1]
+```
+
+The results of the machine learning algorithms show that imploring Random Forest to predict `classe` provides the highest accuracy rate of 99.3%, similar with the stacked version, while the Boosting method gave 96.3% accuracy. 
+Hence, we will use the Random Forest algorithm to answer the predictions for the next 20 test units. To understand this method better, we provide the error rate plot and variable importance plot given below:
+
+```{r, echo=TRUE,fig.dim=c(6,6)}
+plot(mod_rf$finalModel, main="Error Rate of Random Forest")
+varImp(mod_rf, pc=10, main="Variable Importance")
+```
+
+
